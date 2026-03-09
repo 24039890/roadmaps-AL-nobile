@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "AI Roadmap Builder",
+    "slug": "ai-roadmap-builder",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/images/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.yourname.airoadmapbuilder"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.yourname.airoadmapbuilder"
+    },
+    "plugins": ["expo-router", "expo-font"],
+    "scheme": "roadmapapp",
+    "web": {
+      "bundler": "metro",
+      "favicon": "./assets/images/favicon.png"
+    }
+  }
+}
