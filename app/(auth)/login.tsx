@@ -22,6 +22,7 @@ export default function LoginScreen() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [pass, setPass] = useState("");
+  const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
@@ -91,6 +92,7 @@ export default function LoginScreen() {
               Your learning journey — synced across all devices
             </Text>
           </View>
+
           <View style={s.card}>
             <View style={s.tabs}>
               <TouchableOpacity
@@ -110,6 +112,7 @@ export default function LoginScreen() {
                 </Text>
               </TouchableOpacity>
             </View>
+
             {!!info && (
               <View style={s.infoBox}>
                 <Text style={s.infoText}>ℹ {info}</Text>
@@ -120,6 +123,7 @@ export default function LoginScreen() {
                 <Text style={s.errText}>⚠ {error}</Text>
               </View>
             )}
+
             {tab === "signup" && (
               <Field
                 label="Full Name"
@@ -128,6 +132,7 @@ export default function LoginScreen() {
                 placeholder="Your full name"
               />
             )}
+
             <Field
               label="Email Address"
               value={email}
@@ -136,16 +141,27 @@ export default function LoginScreen() {
               autoCapitalize="none"
               keyboardType="email-address"
             />
-            <Field
-              label="Password"
-              value={pass}
-              onChange={setPass}
-              placeholder={
-                tab === "signup" ? "At least 6 characters" : "Your password"
-              }
-              secureTextEntry
-              autoCapitalize="none"
-            />
+
+            <View style={s.passWrap}>
+              <Field
+                label="Password"
+                value={pass}
+                onChange={setPass}
+                placeholder={
+                  tab === "signup" ? "At least 6 characters" : "Your password"
+                }
+                secureTextEntry={!showPass}
+                autoCapitalize="none"
+              />
+              <TouchableOpacity
+                style={s.eyeBtn}
+                onPress={() => setShowPass((v) => !v)}
+                activeOpacity={0.7}
+              >
+                <Text style={s.eyeText}>{showPass ? "🙈" : "👁️"}</Text>
+              </TouchableOpacity>
+            </View>
+
             <Btn
               label={tab === "login" ? "Sign In" : "Create Account"}
               onPress={submit}
@@ -153,6 +169,7 @@ export default function LoginScreen() {
               size="lg"
               style={{ width: "100%" }}
             />
+
             <View style={s.switchRow}>
               <Text style={s.switchText}>
                 {tab === "login"
@@ -168,6 +185,7 @@ export default function LoginScreen() {
               </TouchableOpacity>
             </View>
           </View>
+
           <Text style={s.footer}>
             🔒 Secured by Supabase · Synced across all your devices
           </Text>
@@ -251,6 +269,19 @@ const s = StyleSheet.create({
     marginBottom: 14,
   },
   errText: { color: Colors.danger, fontSize: 13, fontWeight: "700" },
+  passWrap: {
+    position: "relative",
+  },
+  eyeBtn: {
+    position: "absolute",
+    right: 14,
+    bottom: 22,
+    padding: 4,
+    zIndex: 10,
+  },
+  eyeText: {
+    fontSize: 18,
+  },
   switchRow: {
     flexDirection: "row",
     justifyContent: "center",

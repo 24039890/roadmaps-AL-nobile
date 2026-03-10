@@ -1,207 +1,114 @@
 // services/aiService.ts
-import { Roadmap, RoadmapForm } from "../types";
+// ─────────────────────────────────────────────────────────────────────────────
+// The mobile app calls OUR Vercel API route — not Grok directly.
+// This means:
+//   ✅ Zero API keys in the app or .env
+//   ✅ Key lives only on Vercel servers
+//   ✅ Safe to publish on Play Store / App Store
+//
+// Set EXPO_PUBLIC_API_URL in .env to your deployed Vercel URL.
+// For local testing, run `vercel dev` in vercel-api/ and use http://localhost:3000
+// ─────────────────────────────────────────────────────────────────────────────
+import { RoadmapForm, Roadmap } from '../types';
 
-// ── API Keys ───────────────────────────────────────────────────
-const ANTHROPIC_KEY = process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY ?? "";
-const GROQ_KEY = process.env.EXPO_PUBLIC_GROQ_API_KEY ?? "";
+// Your deployed Vercel URL — set in .env
+// e.g. https://ai-roadmap-builder-api.vercel.app
+const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? '';
 
-if (!ANTHROPIC_KEY) {
+if (!API_BASE) {
   console.warn(
-    "[aiService] EXPO_PUBLIC_ANTHROPIC_API_KEY is not set. Anthropic calls will fail.",
+    '[aiService] EXPO_PUBLIC_API_URL is not set.\n' +
+    'Add it to .env and run: expo start --clear\n' +
+    'For local dev: run `vercel dev` in vercel-api/ and set EXPO_PUBLIC_API_URL=http://localhost:3000'
   );
 }
-if (!GROQ_KEY) {
-  console.warn(
-    "[aiService] EXPO_PUBLIC_GROQ_API_KEY is not set. Groq fallback will fail.",
-  );
-}
 
-// ── Build prompt ───────────────────────────────────────────────
-function buildPrompt(form: RoadmapForm): string {
-  return `You are a world-class learning architect. Generate a highly personalized learning roadmap.
-
-USER PROFILE:
-- Skill Level: ${form.level}
-- Known Languages: ${form.languages.join(", ") || "None"}
-- Target Field: ${form.field}
-- Preferred Technologies: ${form.frameworks.join(", ") || "Open"}
-- Weekly Study Hours: ${form.hours} hrs/week
-- Primary Goal: ${form.goal}
-- Specific Focus: ${form.focus || "General mastery"}
-
-Return ONLY valid JSON (no markdown, no prose):
-{
-  "title": "string",
-  "summary": "2-sentence personalized summary",
-  "totalMonths": number,
-  "weeklyHours": ${form.hours},
-  "phases": [
-    {
-      "number": 1,
-      "name": "string",
-      "duration": "X weeks",
-      "goal": "One-sentence phase goal",
-      "topics": ["x5"],
-      "tools": ["x3"],
-      "resources": ["x3"],
-      "exercises": ["x3"],
-      "checklist": ["task1","task2","task3","task4","task5"],
-      "project": { "name": "string", "description": "2-sentence with tech stack" },
-      "milestone": "You can now..."
-    }
-  ]
-}
-
-Rules: Exactly 6 phases (Foundations→Core Skills→Intermediate→Advanced→Real-World Projects→Portfolio & Career). Checklist = exactly 5 items. Milestone starts "You can now...". Realistic for ${form.hours} hrs/week.`;
-}
-
-// ── Extract JSON safely from AI output ─────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// JSON extractor — safety net in case server sends extra prose
+// ─────────────────────────────────────────────────────────────────────────────
 function extractJSON(raw: string): string {
-  let text = raw
-    .replace(/```json\s*/g, "")
-    .replace(/```\s*/g, "")
-    .trim();
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  return start !== -1 && end !== -1 && end > start
-    ? text.slice(start, end + 1)
-    : text;
+  let text = raw.replace(/^```json\s*/gm, '').replace(/^```\s*/gm, '').trim();
+  if (text.startsWith('{')) return text;
+  const start = text.indexOf('{');
+  const end   = text.lastIndexOf('}');
+  if (start !== -1 && end !== -1 && end > start) return text.slice(start, end + 1);
+  return text;
 }
 
-// ── Normalize roadmap deeply ───────────────────────────────────
-function normalizeRoadmap(rawRoadmap: any) {
-  const roadmap = { ...rawRoadmap };
-
-  roadmap.title ||= "Untitled Roadmap";
-  roadmap.summary ||= "No summary provided";
-  roadmap.totalMonths ||= 0;
-  roadmap.weeklyHours ||= 0;
-  roadmap.phases ||= [];
-
-  for (let i = 0; i < 6; i++) {
-    const p = roadmap.phases[i] || {};
-    roadmap.phases[i] = {
-      number: i + 1,
-      name: p.name || `Phase ${i + 1}`,
-      duration: p.duration || "1 week",
-      goal: p.goal || "TBD",
-      topics: Array.isArray(p.topics)
-        ? p.topics.slice(0, 5)
-        : Array(5).fill("TBD Topic"),
-      tools: Array.isArray(p.tools)
-        ? p.tools.slice(0, 3)
-        : Array(3).fill("TBD Tool"),
-      resources: Array.isArray(p.resources)
-        ? p.resources.slice(0, 3)
-        : Array(3).fill("TBD Resource"),
-      exercises: Array.isArray(p.exercises)
-        ? p.exercises.slice(0, 3)
-        : Array(3).fill("TBD Exercise"),
-      checklist: Array.isArray(p.checklist)
-        ? p.checklist.slice(0, 5)
-        : ["task1", "task2", "task3", "task4", "task5"],
-      project: {
-        name: p.project?.name || "TBD",
-        description: p.project?.description || "TBD",
-      },
-      milestone: p.milestone || "You can now...",
-    };
-  }
-
-  return roadmap;
-}
-
-// ── Safe parse JSON ────────────────────────────────────────────
-function safeParse(raw: string) {
-  try {
-    const parsed = JSON.parse(extractJSON(raw));
-    return normalizeRoadmap(parsed);
-  } catch (err) {
-    console.error("[aiService] JSON parse failed:", err);
-    return normalizeRoadmap({});
-  }
-}
-
-// ── Helper: fetch with retry + exponential backoff ─────────────
-async function fetchWithRetry(url: string, options: any, retries = 3) {
-  for (let i = 0; i < retries; i++) {
-    try {
-      const res = await fetch(url, options);
-      if (res.ok) return res;
-      console.warn(`[aiService] Request failed (${res.status}). Retrying...`);
-    } catch (err) {
-      console.warn("[aiService] Network error, retrying...", err);
-    }
-    await new Promise((r) => setTimeout(r, 1000 * (i + 1)));
-  }
-  throw new Error("Network request failed after retries");
-}
-
-// ── Anthropic API call with retry ─────────────────────────────
-async function callAnthropic(form: RoadmapForm) {
-  if (!ANTHROPIC_KEY) throw new Error("No Anthropic key configured.");
-  console.log("[aiService] Calling Anthropic API...");
-
-  const res = await fetchWithRetry("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": ANTHROPIC_KEY,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 8000,
-      messages: [{ role: "user", content: buildPrompt(form) }],
-    }),
-  });
-
-  const data = await res.json();
-  const raw = (data.content ?? []).map((b: any) => b.text ?? "").join("");
-  return safeParse(raw);
-}
-
-// ── Groq API fallback with retry ──────────────────────────────
-async function callGroq(form: RoadmapForm) {
-  if (!GROQ_KEY) throw new Error("No Groq key configured.");
-  console.log("[aiService] Calling Groq API (fallback)...");
-
-  const res = await fetchWithRetry("https://api.groq.ai/v1/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${GROQ_KEY}`,
-    },
-    body: JSON.stringify({
-      model: "groq-1",
-      prompt: buildPrompt(form),
-      max_output_tokens: 2000,
-    }),
-  });
-
-  const data = await res.json();
-  const raw = data.output_text ?? "";
-  return safeParse(raw);
-}
-
-// ── Main export ───────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Main export — called by build.tsx
+// ─────────────────────────────────────────────────────────────────────────────
 export async function generateRoadmap(
   form: RoadmapForm,
-): Promise<Omit<Roadmap, "id" | "createdAt" | "form">> {
-  try {
-    const roadmap = await callAnthropic(form);
-    console.log(
-      "[aiService] Raw roadmap generated by Anthropic:",
-      JSON.stringify(roadmap, null, 2),
+): Promise<Omit<Roadmap, 'id' | 'createdAt' | 'form'>> {
+
+  if (!API_BASE) {
+    throw new Error(
+      'API URL not configured.\n\n' +
+      'Add EXPO_PUBLIC_API_URL to your .env file and restart with: expo start --clear'
     );
-    return roadmap;
-  } catch (err) {
-    console.warn("[aiService] Falling back to Groq due to error:", err);
-    const roadmap = await callGroq(form);
-    console.log(
-      "[aiService] Raw roadmap generated by Groq:",
-      JSON.stringify(roadmap, null, 2),
-    );
-    return roadmap;
   }
+
+  const url = API_BASE.replace(/\/$/, '') + '/api/generate-roadmap';
+  console.log('[aiService] POST', url);
+  console.log('[aiService] Field:', form.field, '| Goal:', form.goal, '| Hours:', form.hours);
+
+  // ── Call our Vercel proxy ─────────────────────────────────────────────────
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ form }),
+    });
+  } catch (netErr: any) {
+    console.error('[aiService] fetch() threw:', netErr?.message ?? netErr);
+    throw new Error('Network error — check your internet connection and try again.');
+  }
+
+  console.log('[aiService] HTTP status:', response.status);
+
+  // ── Handle non-200 ────────────────────────────────────────────────────────
+  if (!response.ok) {
+    let body = '';
+    try { body = await response.text(); } catch (_) {}
+
+    let errMsg = body;
+    try { errMsg = JSON.parse(body)?.error ?? body; } catch (_) {}
+
+    console.error('[aiService] Server error:', response.status, errMsg);
+
+    if (response.status === 401 || response.status === 403) {
+      throw new Error('Authentication error (' + response.status + ').\n\nCheck that XAI_API_KEY is set correctly in your Vercel project environment variables.');
+    }
+    if (response.status === 429) {
+      throw new Error('Rate limit hit (429). Wait a moment and try again.');
+    }
+    if (response.status === 500 || response.status === 502) {
+      throw new Error('Server error (' + response.status + '): ' + errMsg + '\n\nCheck Vercel function logs.');
+    }
+    throw new Error('Request failed (' + response.status + '): ' + errMsg);
+  }
+
+  // ── Parse response ────────────────────────────────────────────────────────
+  let data: any;
+  try {
+    const text = await response.text();
+    console.log('[aiService] Response length:', text.length);
+    console.log('[aiService] First 120 chars:', text.slice(0, 120));
+    const cleaned = extractJSON(text);
+    data = JSON.parse(cleaned);
+  } catch (parseErr: any) {
+    console.error('[aiService] JSON parse failed:', parseErr.message);
+    throw new Error('Could not parse server response. Please try again.');
+  }
+
+  // ── Validate ──────────────────────────────────────────────────────────────
+  if (!data.phases || !Array.isArray(data.phases) || data.phases.length === 0) {
+    console.error('[aiService] Missing phases:', JSON.stringify(data).slice(0, 300));
+    throw new Error('AI response was missing phase data. Please try again.');
+  }
+
+  console.log('[aiService] Success — phases:', data.phases.length);
+  return data;
 }
